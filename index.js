@@ -1,10 +1,19 @@
 const fs = require('fs');
+const path = require('path');
+const process = require('process');
 
 class nzfsdb {
 	path;
 
-	constructor(path = (__dirname + '/')) {
-		this.path = path;
+	constructor(dir) {
+		this.path = path.normalize(dir);
+		console.log(this.path);
+		try {
+			if (!fs.existsSync(this.path)) fs.mkdirSync(this.path, { recursive: true });
+		} catch(e) {
+			console.log(e);
+			process.exit(1);
+		}
 	}
 
 	validateName(name) {
@@ -17,91 +26,46 @@ class nzfsdb {
 		}
 	}
 	
-	stat(path) {
+	stat(dir) {
 		try {
-			fs.statSync(path);
+			fs.statSync(dir);
 			return true;
 		} catch {
 			return false;
 		}
 	}
 
-	mkdir(dir) {
-		if (!this.stat(dir)) {
-			try {
-				fs.mkdirSync(dir);
-				return true;
-			} catch(e) {
-				console.log('\x1b[1m%s\x1b[0m', `Failed to create directory:`, e);
-				return false;
-			}
-		}
-		return true;
-	}
-
-	mkpath(path) {
-		let arrayOfDirs;
-		arrayOfDirs = path.split('/');
-		path = '/';
-		let keys = Object.keys(arrayOfDirs);
-		for (let i = 0, l = keys.length; i < l; i++) {
-			if (arrayOfDirs[keys[i]].length > 0) {
-				if ((this.validateName(arrayOfDirs[keys[i]])) === true) {
-					// validation was successful
-					path += arrayOfDirs[keys[i]] + '/';
-					if (!fs.existsSync(path)) {
-						if (!this.mkdir(path)) return false;
-					}
-				} else {
-					console.log(arrayOfDirs[keys[i]], '- The directory name is invalid');
-					return false;
-				}
-			}
-		}
-		return path;
-	}
-
-	checkPath(path = null) {
+	checkPath(dir = null) {
 		try {
-			if (path === null) {
-				path = this.path;
-			} else if (typeof path === 'string') {
-				path = this.path + path;
+			if (dir === null) {
+				dir = this.path;
+			} else if (typeof dir === 'string') {
+				dir = path.normalize(path.join(this.path, dir));
 			} else {
 				return false;
 			}
-			try {
-				if (!fs.existsSync(path)) throw new Error();
-			} catch(e) {
-				if (!this.mkpath(path)) return false;
-			}
-			if (path.slice(-1) !== '/') path += '/';
-			return path;
+			if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+			return dir;
 		} catch(e) {
 			console.log('\x1b[1m%s\x1b[0m', `Failed to check path:`, e);
 			return false;
 		}
 	}
 
-	checkExists(path = null, file = null) {
+	checkExists(dir = null, file = null) {
 		try {
-			path = this.checkPath(path);
-			if (!path) return false;
+			dir = this.checkPath(dir);
+			if (!dir) throw new Error('no appropriate directory');
 
 			if (file !== null) {
 				if ((this.validateName(file)) === true) {
-					if (fs.existsSync(path + file)) {
-						return {path, file};
-					} else {
-						return false;
-					}
+					if (!fs.existsSync(path.normalize(path.join(dir, file)))) return false;
 				} else {
-					console.log(file, '- The file name is invalid');
-					return false;
+					throw new Error(file, '- The file name is invalid');
 				}
 			}
 
-			return {path, file};
+			return {dir, file};
 
 		} catch(e) {
 			console.log('\x1b[1m%s\x1b[0m', `Failed to check exists:`, e);
@@ -109,44 +73,41 @@ class nzfsdb {
 		}
 	}
 
-	read(path = null, file = null) {
-		let obj = this.checkExists(path, file) || false;
+	read(dir = null, file = null) {
+		let obj = this.checkExists(dir, file) || false;
 		let result = {};
 		try {
-			if (obj) {
-				if (obj.file === null) {
-					let files = fs.readdirSync(obj.path);
-					let j = 0;
-					for (var i in files) {
-						var name = obj.path + files[i];
-						if (!fs.statSync(name).isDirectory()) {
-							result[j] = files[i];
-							j++;
-						}
+			if (!obj) throw new Error('the object being read does not exist');
+			if (obj.file === null) {
+				let files = fs.readdirSync(obj.dir);
+				let j = 0;
+				for (var i in files) {
+					var name = path.normalize(path.join(obj.dir, files[i]));
+					if (!fs.statSync(name).isDirectory()) {
+						result[j] = files[i];
+						j++;
 					}
-					return result;
-				} else if (typeof obj.file === 'string') {
-					result = fs.readFileSync(obj.path + obj.file, 'utf8');
-				} else {
-					return false;
 				}
+				return result;
+			} else if (typeof obj.file === 'string') {
+				result = fs.readFileSync(path.normalize(path.join(obj.dir, obj.file)), 'utf8');
 			} else {
 				return false;
 			}
 		} catch(e) {
-			console.log(e);
+			console.log('Error:', e);
 			return false;
 		}
 		return result;
 	}
 
-	write(path = null, file = null, string = '') {
-		let obj = this.checkExists(path, null) || false;
+	write(dir = null, file = null, string = '') {
+		let obj = this.checkExists(dir, null) || false;
 		try {
 			if ((obj)
 			&& ((this.validateName(file)) === true)
 			&& (typeof string === 'string')) {
-				fs.writeFileSync(obj.path + file, string);
+				fs.writeFileSync(path.normalize(path.join(obj.dir, file)), string);
 				return true;
 			} else {
 				return false;
@@ -157,25 +118,22 @@ class nzfsdb {
 		}
 	}
 
-	delete(path = null, file = null) {
-		let obj = this.checkExists(path, file) || false;
+	delete(dir = null, file = null) {
+		let obj = this.checkExists(dir, file) || false;
 		let result = true;
 		try {
-			if (obj) {
-				if (obj.file === null) {
-					fs.rmSync(obj.path, { recursive: true });
-					if (this.stat(obj.path)) return false;
-				} else if (typeof obj.file === 'string') {
-					fs.unlinkSync(obj.path + obj.file);
-					if (this.checkExists(path, obj.file)) return false;
-				} else {
-					return false;
-				}
+			if (!obj) throw new Error('the object being deleted does not exist');
+			if (obj.file === null) {
+				fs.rmSync(obj.dir, { recursive: true });
+				if (this.stat(obj.dir)) throw new Error('failed to delete directory');
+			} else if (typeof obj.file === 'string') {
+				fs.unlinkSync(path.normalize(path.join(obj.dir, obj.file)));
+				if (this.checkExists(dir, file)) throw new Error('failed to delete file');
 			} else {
 				return false;
 			}
 		} catch(e) {
-			console.log(e);
+			console.log('Error:', e);
 			return false;
 		}
 		return result;
